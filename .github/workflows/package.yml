@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install tools
         run: |
@@ -37,7 +39,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p staging
-          gh release download "$STAGING" --dir staging --clobber
+          gh release download "$STAGING" --dir staging --clobber \
+            -p rootfs-noboot.tar.zst \
+            -p dex2oat-inputs.tar.zst \
+            -p build-manifest.json \
+            -p system.img -p vendor.img -p NOTICE.txt
           ls -lh staging
           test -f staging/rootfs-noboot.tar.zst
           test -f staging/dex2oat-inputs.tar.zst
@@ -49,7 +55,7 @@ jobs:
           tar --zstd -xf staging/dex2oat-inputs.tar.zst -C staging/dex
           bash staging/dex/dex2oat-inputs/run.sh "$PWD/staging/boot"
           echo "--- produced:"
-          find staging/boot -type f -printf '%s %p\n' | sort -n
+          find staging/boot -type f -printf '%10s %p\n' | sort -n
 
       - name: Assemble rootfs
         run: |
@@ -57,10 +63,9 @@ jobs:
           mkdir -p rootfs
           tar --zstd -xf staging/rootfs-noboot.tar.zst -C rootfs
           test -d rootfs/system/framework
-          # boot image and per-jar ARTs, exactly as AOSP installs them
           mkdir -p rootfs/system/framework/arm64
           cp -a staging/boot/system/framework/. rootfs/system/framework/
-          ls -lh rootfs/system/framework/arm64 | head -20
+          ls -lh rootfs/system/framework/arm64
           tar --zstd -cf rootfs.tar.zst -C rootfs .
           ls -lh rootfs.tar.zst
 
@@ -69,30 +74,20 @@ jobs:
           COMPAT: ${{ inputs.compat_tag }}
         run: |
           set -euo pipefail
-          if ! gh release download "$COMPAT" -p compat_tool.tar.zst -D . --clobber; then
-            echo "::warning::compat_tool.tar.zst not found in $COMPAT, continuing without it"
+          if gh release download "$COMPAT" -p compat_tool.tar.zst -D . --clobber; then
+            echo "compat_tool.tar.zst: $(stat -c %s compat_tool.tar.zst) bytes"
+          else
+            echo "::warning::compat_tool.tar.zst not found in $COMPAT"
           fi
-          ls -lh compat_tool.tar.zst 2>/dev/null || true
 
-      - name: Checksums and splitting
+      - name: Checksums and asset prep
         run: |
           set -euo pipefail
           mkdir -p publish
-          split_if_big() {
-            f="$1"; max=$((1900*1024*1024))
-            size=$(stat -c %s "$f")
-            if [ "$size" -le "$max" ]; then
-              cp "$f" publish/
-            else
-              split -b 1900M -d --numeric-suffixes=1 -a 2 --additional-suffix ".part" "$f" "publish/$(basename "$f").part"
-            fi
-          }
-          for f in rootfs.tar.zst system.img vendor.img NOTICE.txt symbols.tar.zst; do
-            [ -f "$f" ] || continue
-            split_if_big "$f"
-          done
-          cp compat_tool.tar.zst publish/ 2>/dev/null || true
-          rm -f publish/*.part*.part 2>/dev/null || true
+          cp rootfs.tar.zst publish/
+          cp staging/system.img staging/vendor.img staging/NOTICE.txt publish/
+          cp staging/build-manifest.json publish/
+          [ -f compat_tool.tar.zst ] && cp compat_tool.tar.zst publish/
           ( cd publish && sha256sum * > SHA256SUMS && cat SHA256SUMS )
           ls -lh publish
 
@@ -102,9 +97,8 @@ jobs:
           STAGING: ${{ inputs.staging_tag }}
         run: |
           set -euo pipefail
-          BODY=$(printf 'Assembled from staging release %s by %s.\n\nStaging: %s\nCommit: %s\n' \
-            "$FINAL" "$GITHUB_WORKFLOW" "$STAGING" "$GITHUB_SHA")
+          BODY=$(printf 'Lepton Android 11 rootfs, assembled by CI.\n\n- staging: %s\n- source commit: %s\n- debug symbols: see the staging release assets\n' "$STAGING" "$GITHUB_SHA")
           gh release view "$FINAL" >/dev/null 2>&1 || \
             gh release create "$FINAL" --title "Lepton Android 11 $FINAL" --notes "$BODY" --latest=false
           gh release upload "$FINAL" publish/* --clobber
-          echo "published $FINAL"
+          gh release view "$FINAL" --json assets --jq '.assets[] | "\(.name) \(.size)"'
