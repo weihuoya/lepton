@@ -1,0 +1,47 @@
+name: compat-tool
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to attach compat_tool.tar.zst (created if missing)"
+        required: true
+        default: compat-tool-latest
+  push:
+    branches: [main]
+    paths:
+      - "compat_tool/**"
+      - ".ci_scripts/build-compat_tool.sh"
+      - ".ci_scripts/install-build-compat_tool-dependencies.sh"
+      - ".github/workflows/compat-tool.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: ./.ci_scripts/install-build-compat_tool-dependencies.sh
+
+      - name: Build compat tool
+        run: ./.ci_scripts/build-compat_tool.sh
+
+      - name: Checksums
+        run: |
+          sha256sum compat_tool.tar.zst > compat_tool.tar.zst.sha256
+          cat compat_tool.tar.zst.sha256
+
+      - name: Publish to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || 'compat-tool-latest' }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "compat-tool $TAG" \
+              --notes "compat_tool.tar.zst built from ${GITHUB_SHA}" --latest=false
+          gh release upload "$TAG" compat_tool.tar.zst compat_tool.tar.zst.sha256 --clobber

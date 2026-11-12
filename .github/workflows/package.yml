@@ -1,0 +1,110 @@
+name: package
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_tag:
+        description: "Release tag holding staging assets (rootfs-noboot, dex2oat-inputs, system.img, ...)"
+        required: true
+      final_tag:
+        description: "Release tag to publish the final artifacts"
+        required: true
+      compat_tag:
+        description: "Release tag holding compat_tool.tar.zst"
+        required: false
+        default: compat-tool-latest
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zstd coreutils
+
+      - name: Download staging assets
+        env:
+          STAGING: ${{ inputs.staging_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          gh release download "$STAGING" --dir staging --clobber
+          ls -lh staging
+          test -f staging/rootfs-noboot.tar.zst
+          test -f staging/dex2oat-inputs.tar.zst
+
+      - name: Generate boot image with dex2oat
+        run: |
+          set -euo pipefail
+          mkdir -p staging/dex staging/boot
+          tar --zstd -xf staging/dex2oat-inputs.tar.zst -C staging/dex
+          bash staging/dex/dex2oat-inputs/run.sh "$PWD/staging/boot"
+          echo "--- produced:"
+          find staging/boot -type f -printf '%s %p\n' | sort -n
+
+      - name: Assemble rootfs
+        run: |
+          set -euo pipefail
+          mkdir -p rootfs
+          tar --zstd -xf staging/rootfs-noboot.tar.zst -C rootfs
+          test -d rootfs/system/framework
+          # boot image and per-jar ARTs, exactly as AOSP installs them
+          mkdir -p rootfs/system/framework/arm64
+          cp -a staging/boot/system/framework/. rootfs/system/framework/
+          ls -lh rootfs/system/framework/arm64 | head -20
+          tar --zstd -cf rootfs.tar.zst -C rootfs .
+          ls -lh rootfs.tar.zst
+
+      - name: Fetch compat tool
+        env:
+          COMPAT: ${{ inputs.compat_tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release download "$COMPAT" -p compat_tool.tar.zst -D . --clobber; then
+            echo "::warning::compat_tool.tar.zst not found in $COMPAT, continuing without it"
+          fi
+          ls -lh compat_tool.tar.zst 2>/dev/null || true
+
+      - name: Checksums and splitting
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          split_if_big() {
+            f="$1"; max=$((1900*1024*1024))
+            size=$(stat -c %s "$f")
+            if [ "$size" -le "$max" ]; then
+              cp "$f" publish/
+            else
+              split -b 1900M -d --numeric-suffixes=1 -a 2 --additional-suffix ".part" "$f" "publish/$(basename "$f").part"
+            fi
+          }
+          for f in rootfs.tar.zst system.img vendor.img NOTICE.txt symbols.tar.zst; do
+            [ -f "$f" ] || continue
+            split_if_big "$f"
+          done
+          cp compat_tool.tar.zst publish/ 2>/dev/null || true
+          rm -f publish/*.part*.part 2>/dev/null || true
+          ( cd publish && sha256sum * > SHA256SUMS && cat SHA256SUMS )
+          ls -lh publish
+
+      - name: Publish final release
+        env:
+          FINAL: ${{ inputs.final_tag }}
+          STAGING: ${{ inputs.staging_tag }}
+        run: |
+          set -euo pipefail
+          BODY=$(printf 'Assembled from staging release %s by %s.\n\nStaging: %s\nCommit: %s\n' \
+            "$FINAL" "$GITHUB_WORKFLOW" "$STAGING" "$GITHUB_SHA")
+          gh release view "$FINAL" >/dev/null 2>&1 || \
+            gh release create "$FINAL" --title "Lepton Android 11 $FINAL" --notes "$BODY" --latest=false
+          gh release upload "$FINAL" publish/* --clobber
+          echo "published $FINAL"
