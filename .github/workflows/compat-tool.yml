@@ -23,9 +23,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install dependencies
-        run: ./.ci_scripts/install-build-compat_tool-dependencies.sh
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu libc6-dev-arm64-cross build-essential \
+            git tar zstd curl ca-certificates
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          "$HOME/.cargo/bin/rustup" target add aarch64-unknown-linux-gnu
+          "$HOME/.cargo/bin/rustc" --version
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build compat tool
         run: ./.ci_scripts/build-compat_tool.sh
