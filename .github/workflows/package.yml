@@ -102,7 +102,7 @@ jobs:
           STAGING: ${{ inputs.staging_tag }}
         run: |
           set -euo pipefail
-          BODY=$(printf 'Lepton Android 11 rootfs, assembled by CI.\n\n- staging: %s\n- source commit: %s\n- debug symbols: see the staging release assets\n' "$STAGING" "$GITHUB_SHA")
+          BODY=$(printf 'Lepton Android 11 rootfs, assembled by CI.\n\n- staging: %s\n- source commit: %s\n- debug symbols: not published for this build\n' "$STAGING" "$GITHUB_SHA")
           gh release view "$FINAL" >/dev/null 2>&1 || \
             gh release create "$FINAL" --title "Lepton Android 11 $FINAL" --notes "$BODY" --latest=false
           gh release upload "$FINAL" publish/* --clobber
