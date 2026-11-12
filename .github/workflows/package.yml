@@ -65,7 +65,12 @@ jobs:
           test -d rootfs/system/framework
           mkdir -p rootfs/system/framework/arm64
           cp -a staging/boot/system/framework/. rootfs/system/framework/
+          # ART APEX core image: the runtime loads it before the framework image.
+          mkdir -p rootfs/apex/com.android.art/javalib/arm64
+          cp -a staging/dex/dex2oat-inputs/inputs/apex/com.android.art/javalib/arm64/. \
+                rootfs/apex/com.android.art/javalib/arm64/
           ls -lh rootfs/system/framework/arm64
+          ls -lh rootfs/apex/com.android.art/javalib/arm64
           tar --zstd -cf rootfs.tar.zst -C rootfs .
           ls -lh rootfs.tar.zst
 
