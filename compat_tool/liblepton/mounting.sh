@@ -80,6 +80,7 @@ function setup_mounts()
     GUESTOS_OVERLAY="/usr/share/guestos/android"
 
     for OVERLAY in "${LEPTON_OVERLAY}" "${GUESTOS_OVERLAY}"; do
+        [[ -d "${OVERLAY}" ]] || continue
         pushd "${OVERLAY}" >/dev/null || exit
         while IFS= read -r -d '' file; do
             DST="${file#./}"
@@ -102,7 +103,7 @@ function setup_mounts()
         APP_MOUNT_TARGET="$(get_app_mount_dir)"
     fi
 
-    if is_sysbake; then
+    if is_sysbake || [[ "${LEPTON_DATA_BIND:-0}" == "1" ]]; then
         podman_cmdline --mount "type=bind,source="$(data_mount_path)",target=/data"
     else
         local DATA_OVERLAY_UPPERDIR="$(data_mount_path)"
@@ -210,7 +211,8 @@ function setup_podman_base()
     fi
 
     # nice rlimit (prevents binder messages in dmesg)
-    podman_cmdline --ulimit nice=20:20
+    # 容器内没有宿主 CAP_SYS_RESOURCE，无法设置 nice rlimit（ROCKNIX 上必失败）
+    # podman_cmdline --ulimit nice=20:20
 
     # capabilities
     podman_cmdline --cap-drop ALL
@@ -238,6 +240,10 @@ function setup_podman_base()
     podman_cmdline --cap-add fowner
     podman_cmdline --cap-add ipc_lock
     podman_cmdline --cap-add sys_chroot
+
+    # binderfs 的设备节点是动态创建的，不在 podman 默认 device cgroup 白名单里，
+    # 不加这条规则容器内 open("/dev/binder") 会返回 EPERM。
+    podman_cmdline --device-cgroup-rule "c 507:* rwm"
 
     # hostname
     podman_cmdline --hostname "lepton-${LEPTON_CONTEXT}"
@@ -447,7 +453,7 @@ function setup_podman_mounts()
     podman_cmdline --tmpfs /waydroid/xdg
 
     local DEV_NODES=(
-        zero null full fuse tty char
+        zero null full fuse char
 
         # V4L2 video devices (Note: explicitly do not share 99, we use that for screen broadcasting)
         # Update: Elliot is explicitly disabling this for now, until we decide that we _want_
@@ -513,7 +519,8 @@ function setup_podman_mounts()
     touch "${DATA_OVERLAY}/misc/ethernet/ipconfig.txt"
     podman_mount_entry "$(prefix)/ipconfig.txt" "/data/misc/ethernet/ipconfig.txt" rw
 
-    if ! is_sysbake; then
+    # SteamOS 的 `steamvr` 工具在非 SteamOS 宿主上不存在，跳过 steamvr 挂载
+    if ! is_sysbake && command -v steamvr >/dev/null 2>&1; then
         mkdir -p "${DATA_OVERLAY}/steamvr/runtime"
         # Add our steamvr build into `/data/steamvr/runtime` and `/data/steamvr/config`
         podman_mount_entry "$(steamvr path)" "/data/steamvr/runtime" rw

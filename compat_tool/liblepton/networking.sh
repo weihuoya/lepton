@@ -73,6 +73,11 @@ function setup_podman_port_forwards()
 
 function podman_network_options()
 {
+    # 设备侧覆盖：rootful podman 不支持 pasta；host 网络会让 Android 改坏宿主网络
+    case "${LEPTON_CONTAINER_NETWORK:-}" in
+        none) print "--network=none"; return ;;
+    esac
+
     local PODMAN_NETWORK_OPTIONS=""
 
     # Using a network type which works without root (pasta)

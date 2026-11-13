@@ -1,4 +1,2 @@
-on early-init
-    mkdir /dev/binderfs
-    exec - root root -- /system/bin/mount -t binder binder /dev/binderfs
-
+# binderfs 由 rootfs 自带的 /system/etc/init/hw/init.rc 挂载，
+# 设备侧不要再挂一次（重复挂载会叠加 binderfs，导致 /dev/binder 不可用）。

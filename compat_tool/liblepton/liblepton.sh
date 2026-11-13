@@ -185,7 +185,11 @@ function start_container()
     # and to avoid spawning multiple "init" processes.
     # --read-only and --rootfs with the :O option make sure that we don't
     # accidentally modify the rootfs storage itself.
-    USERNS_ARGS=(--userns=keep-id:uid=0,gid=0 --user 0:0 --group-add keep-groups)
+    if [[ "${EUID}" == "0" ]]; then
+        USERNS_ARGS=()
+    else
+        USERNS_ARGS=(--userns=keep-id:uid=0,gid=0 --user 0:0 --group-add keep-groups)
+    fi
     LOG_LEVEL_ARGS=()
     if [[ "${LEPTON_DEBUG:-false}" != "false" ]]; then
         LOG_LEVEL_ARGS=(--log-level=debug)

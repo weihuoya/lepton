@@ -178,7 +178,7 @@ function enable_vulkan_layers()
     fi
 
     # Fossilize goes after any other normal layers
-    enable_vulkan_layer "${FOSSILIZE_LAYER_NAME}"
+    enable_vulkan_layer "${FOSSILIZE_LAYER_NAME}" || true
 
     # If you want to debug the app + layers, vulkan validation layers inserted here makes sense
     if [[ "${ENABLE_VULKAN_VALIDATION_LAYER_LATE:-0}" != "0" ]]; then
