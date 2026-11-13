@@ -2,6 +2,12 @@
 
 function podman_ip()
 {
+    # bridge 网络下用 lnet 网段的静态地址，而不是宿主 IP（pasta 语义）
+    if [[ "${LEPTON_CONTAINER_NETWORK:-}" == "bridge" ]]; then
+        print "${LEPTON_BRIDGE_IP:-10.0.4.2}"
+        return
+    fi
+
     local PODMAN_IP="$(podman inspect -f '{{ index .Config.Labels "IP" }}' "lepton-${1:-${LEPTON_CONTEXT}}" 2>/dev/null || true)"
     if [[ -n "${PODMAN_IP}" ]]; then
         print "${PODMAN_IP}"
@@ -76,6 +82,7 @@ function podman_network_options()
     # 设备侧覆盖：rootful podman 不支持 pasta；host 网络会让 Android 改坏宿主网络
     case "${LEPTON_CONTAINER_NETWORK:-}" in
         none) print "--network=none"; return ;;
+        bridge) print "--network=${LEPTON_BRIDGE_NETWORK:-lnet}:ip=$(podman_ip)"; return ;;
     esac
 
     local PODMAN_NETWORK_OPTIONS=""
