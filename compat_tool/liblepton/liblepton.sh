@@ -115,7 +115,22 @@ function prefix()
 
 function data_mount_path()
 {
-    print "$(get_baked_app_data_dir $@)/data_overlay"
+    local BAKED="$(get_baked_app_data_dir $@)"
+
+    # LEPTON_DATA_BIND=1：overlay /data 上 mmap 会 SIGBUS，改用 bind。
+    # 但不直接绑 baked/data_overlay（会被容器写脏），而是首次从它拷一份到
+    # baked/data，之后一直用这份可写副本。
+    if [[ "${LEPTON_DATA_BIND:-0}" == "1" ]] && ! is_sysbake; then
+        local LIVE="${BAKED}/data"
+        if [[ ! -d "${LIVE}" ]]; then
+            mkdir -p "${LIVE}"
+            cp -a "${BAKED}/data_overlay/." "${LIVE}/" 2>/dev/null || true
+        fi
+        print "${LIVE}"
+        return
+    fi
+
+    print "${BAKED}/data_overlay"
 }
 
 # The workdir must be in the same filesystem as the upperdir
