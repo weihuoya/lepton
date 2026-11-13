@@ -241,6 +241,10 @@ function setup_podman_base()
     podman_cmdline --cap-add ipc_lock
     podman_cmdline --cap-add sys_chroot
 
+    # podman 默认把 /proc/sys 挂成只读，Android 的 netd 需要写
+    # /proc/sys/net/ipv6/conf/<iface>/* 才能配置以太网
+    podman_cmdline --security-opt unmask=/proc/sys
+
     # binderfs 的设备节点是动态创建的，不在 podman 默认 device cgroup 白名单里，
     # 不加这条规则容器内 open("/dev/binder") 会返回 EPERM。
     podman_cmdline --device-cgroup-rule "c 507:* rwm"

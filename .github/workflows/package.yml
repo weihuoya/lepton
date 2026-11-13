@@ -73,6 +73,12 @@ jobs:
                 rootfs/system/apex/com.android.art.release/javalib/arm64/
           ls -lh rootfs/system/framework/arm64
           ls -lh rootfs/system/apex/com.android.art.release/javalib/arm64
+          # staging 的 tar 属主是构建用户的 uid（不是 Android 的 root/system），
+          # 权限也被压成 750——Android 里以非 root 用户运行的服务（logd/netd 等）
+          # 会因此 EACCES。统一改成 root:root 并补回 other 执行位。
+          sudo chown -R 0:0 rootfs
+          sudo chmod 755 rootfs/system/bin/run-as rootfs/system/bin/simpleperf_app_runner \
+                rootfs/system/bin/uncrypt rootfs/init.environ.rc
           tar --zstd -cf rootfs.tar.zst -C rootfs .
           ls -lh rootfs.tar.zst
 
