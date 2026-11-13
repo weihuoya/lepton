@@ -66,11 +66,13 @@ jobs:
           mkdir -p rootfs/system/framework/arm64
           cp -a staging/boot/system/framework/. rootfs/system/framework/
           # ART APEX core image: the runtime loads it before the framework image.
-          mkdir -p rootfs/apex/com.android.art/javalib/arm64
+          # 注意：运行时 /apex/com.android.art 是 /system/apex/com.android.art.release 的
+          # bind mount（init.rc 挂的），必须写进后者，写 rootfs/apex/... 会被挂载覆盖。
+          mkdir -p rootfs/system/apex/com.android.art.release/javalib/arm64
           cp -a staging/dex/dex2oat-inputs/inputs/apex/com.android.art/javalib/arm64/. \
-                rootfs/apex/com.android.art/javalib/arm64/
+                rootfs/system/apex/com.android.art.release/javalib/arm64/
           ls -lh rootfs/system/framework/arm64
-          ls -lh rootfs/apex/com.android.art/javalib/arm64
+          ls -lh rootfs/system/apex/com.android.art.release/javalib/arm64
           tar --zstd -cf rootfs.tar.zst -C rootfs .
           ls -lh rootfs.tar.zst
 
