@@ -77,7 +77,7 @@ jobs:
           # 权限也被压成 750——Android 里以非 root 用户运行的服务（logd/netd 等）
           # 会因此 EACCES。统一改成 root:root 并补回 other 执行位。
           sudo chown -R 0:0 rootfs
-          sudo find rootfs -type f -perm 750 -exec chmod 755 {} +
+          sudo find rootfs -type f -perm -u+x ! -perm -o+x -exec chmod 755 {} +
           sudo tar --zstd -cf rootfs.tar.zst -C rootfs .
           sudo chmod 644 rootfs.tar.zst
           ls -lh rootfs.tar.zst
