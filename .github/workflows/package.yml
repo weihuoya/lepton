@@ -79,7 +79,8 @@ jobs:
           sudo chown -R 0:0 rootfs
           sudo chmod 755 rootfs/system/bin/run-as rootfs/system/bin/simpleperf_app_runner \
                 rootfs/system/bin/uncrypt rootfs/init.environ.rc
-          tar --zstd -cf rootfs.tar.zst -C rootfs .
+          sudo tar --zstd -cf rootfs.tar.zst -C rootfs .
+          sudo chmod 644 rootfs.tar.zst
           ls -lh rootfs.tar.zst
 
       - name: Fetch compat tool
