@@ -22,6 +22,7 @@ cp ${PROJECT_DIR}/compat_tool/lepton .
 ln -sf lepton fauxdroid
 
 cp -ra ${PROJECT_DIR}/compat_tool/toolmanifest.vdf .
+cp -ra ${PROJECT_DIR}/compat_tool/storage-native.conf .
 cp -ra ${PROJECT_DIR}/README.md .
 cp -ra ${PROJECT_DIR}/LICENSE.md .
 cp -ra ${PROJECT_DIR}/LICENSES .

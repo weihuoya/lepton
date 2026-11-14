@@ -80,8 +80,8 @@ function setup_props()
             props_echo "ro.hardware.gralloc=minigbm_msm"
         fi
 
-        # Zink + disable kopper to work with mesa
-        props_echo "mesa.loader.driver.override=zink"
+        # 当前 rootfs 只编入 freedreno gallium；有 zink 的构建可用环境变量覆盖。
+        props_echo "mesa.loader.driver.override=${LEPTON_MESA_DRIVER:-freedreno}"
         props_echo "mesa.libgl.kopper.disable=true"
 
         # Tell Fossilize to write out shaders to this directory
@@ -91,6 +91,11 @@ function setup_props()
             props_echo "mesa.shader.cache.disable=false"
             props_echo "mesa.shader.cache.dir=/data/shaders"
         fi
+    fi
+
+    if [[ "${LEPTON_HWUI_VULKAN:-0}" == "1" ]]; then
+        props_echo "ro.hwui.use_vulkan=true"
+        props_echo "debug.hwui.renderer=vulkan"
     fi
 
     props_echo "ro.vndk.lite=true"

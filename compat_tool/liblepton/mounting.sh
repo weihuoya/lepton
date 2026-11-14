@@ -248,6 +248,8 @@ function setup_podman_base()
     # binderfs 的设备节点是动态创建的，不在 podman 默认 device cgroup 白名单里，
     # 不加这条规则容器内 open("/dev/binder") 会返回 EPERM。
     podman_cmdline --device-cgroup-rule "c 507:* rwm"
+    # DRI 也是 bind mount；renderD128/card0 需要显式放行，否则 Mesa open DRM 失败。
+    podman_cmdline --device-cgroup-rule "c 226:* rwm"
 
     # hostname
     podman_cmdline --hostname "lepton-${LEPTON_CONTEXT}"

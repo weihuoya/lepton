@@ -5,6 +5,10 @@ if [[ "${LIBLEPTON_STRICT:-true}" == "true" ]]; then
 fi
 LEPTON_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+if [[ "${EUID}" == "0" && -z "${CONTAINERS_STORAGE_CONF:-}" ]]; then
+    export CONTAINERS_STORAGE_CONF="${LEPTON_STORAGE_CONF:-${LEPTON_DIR}/../storage-native.conf}"
+fi
+
 # Global storage locations
 LEPTON_ENTRYPOINT="${LEPTON_DIR}/../lepton"
 LEPTON_DATA_DIR="${HOME}/.local/share/lepton/contexts"
@@ -118,13 +122,22 @@ function data_mount_path()
     local BAKED="$(get_baked_app_data_dir $@)"
 
     # LEPTON_DATA_BIND=1：overlay /data 上 mmap 会 SIGBUS，改用 bind。
-    # 但不直接绑 baked/data_overlay（会被容器写脏），而是首次从它拷一份到
-    # baked/data，之后一直用这份可写副本。
+    # app bake 存在时保留其中的应用数据；dev/首次启动则回退到系统 sysbake。
     if [[ "${LEPTON_DATA_BIND:-0}" == "1" ]] && ! is_sysbake; then
-        local LIVE="${BAKED}/data"
+        local LIVE="${LEPTON_DATA_LIVE:-${BAKED}/data}"
+        local SOURCE="${BAKED}/data_overlay"
+        if [[ ! -d "${SOURCE}" ]]; then
+            SOURCE="${BAKED_SYSTEM_DATA_DIR}"
+        fi
         if [[ ! -d "${LIVE}" ]]; then
             mkdir -p "${LIVE}"
-            cp -a "${BAKED}/data_overlay/." "${LIVE}/" 2>/dev/null || true
+            cp -a "${SOURCE}/." "${LIVE}/"
+        fi
+        # rootful 下 zygote/system_server 也运行成 UID 0；保留 sysbake 的
+        # UID 1000 会让 packages.xml、batterystats 等文件 EACCES。
+        if [[ "${EUID}" == "0" && -d "${LIVE}/system" ]] \
+            && [[ "$(stat -c %u "${LIVE}/system")" != "0" ]]; then
+            chown -R 0:0 "${LIVE}"
         fi
         print "${LIVE}"
         return
