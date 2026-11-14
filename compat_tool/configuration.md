@@ -14,7 +14,8 @@
 * ```LEPTON_LOCK_TIMEOUT``` maximum time to wait for the lepton.lock. This is mostly a debugging/test option.
 * ```LEPTON_APP_LAUNCH_TIMEOUT``` maximum time to wait until an app is considered as failed to start.
 * ```LEPTON_APP_INSTALL_TIMEOUT``` maximum time in seconds to wait for app installation. Defaults to 600.
-* ```LEPTON_DISPLAY_WIDTH``` / ```LEPTON_DISPLAY_HEIGHT``` override the Waydroid physical output size. On SM8550 the defaults are 1280x720, which becomes 2560x1440 after Sway's scale=2 and fills the landscape screen.
+* ```LEPTON_DISPLAY_WIDTH``` / ```LEPTON_DISPLAY_HEIGHT``` override the Waydroid physical output size. On SM8550 the defaults are 1280x720, which becomes 2560x1440 after Sway's scale=2 and fills the landscape screen. For native-resolution text, use Sway scale=1 with 2560x1440.
+* ```LEPTON_DISPLAY_DENSITY``` overrides Android's ```ro.sf.lcd_density``` independently of Sway scale (default: 360 on SM8550).
 * ```LEPTON_MESA_DRIVER``` overrides the Mesa gallium driver. The current rootfs uses ```freedreno``` by default.
 * ```LEPTON_DATA_LIVE``` overrides the writable /data bind source for rootful containers.
 * ```LEPTON_HWUI_VULKAN=1``` opts into HWUI Vulkan for diagnostics; it is not required for Turnip smoke testing.

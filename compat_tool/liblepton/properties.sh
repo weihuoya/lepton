@@ -98,6 +98,7 @@ function setup_props()
         props_echo "debug.hwui.renderer=vulkan"
     fi
 
+    props_echo "ro.sf.lcd_density=${LEPTON_DISPLAY_DENSITY:-360}"
     # SM8550 的 Sway scale=2：1280x720 经缩放后为 2560x1440，横屏铺满。
     props_echo "persist.waydroid.width=${LEPTON_DISPLAY_WIDTH:-1280}"
     props_echo "persist.waydroid.height=${LEPTON_DISPLAY_HEIGHT:-720}"
