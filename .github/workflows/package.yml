@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       staging_tag:
-        description: "Release tag holding staging assets (rootfs-noboot, dex2oat-inputs, system.img, ...)"
+        description: "Release tag holding staging assets (rootfs-noboot, system.img, vendor.img, NOTICE, manifest; dex2oat 见 dex2oat_tag)"
         required: true
       final_tag:
         description: "Release tag to publish the final artifacts"
@@ -13,6 +13,10 @@ on:
         description: "Release tag holding compat_tool.tar.zst"
         required: false
         default: compat-tool-latest
+      dex2oat_tag:
+        description: "Release tag holding dex2oat-inputs.tar.zst (default: staging_tag).框架 jar 没变时指向上一次的 release，省一次 139 MB 上行"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -36,14 +40,19 @@ jobs:
       - name: Download staging assets
         env:
           STAGING: ${{ inputs.staging_tag }}
+          DEX2OAT_TAG: ${{ inputs.dex2oat_tag }}
         run: |
           set -euo pipefail
           mkdir -p staging
           gh release download "$STAGING" --dir staging --clobber \
             -p rootfs-noboot.tar.zst \
-            -p dex2oat-inputs.tar.zst \
             -p build-manifest.json \
             -p system.img -p vendor.img -p NOTICE.txt
+          # dex2oat-inputs 只与 system 侧的 framework jar / ART apex 有关，
+          # 这些没变时可以复用旧 release（省一次 139 MB 上传）。
+          DEX_TAG="${DEX2OAT_TAG:-$STAGING}"
+          gh release download "$DEX_TAG" --dir staging --clobber -p dex2oat-inputs.tar.zst \
+            || gh release download "$STAGING" --dir staging --clobber -p dex2oat-inputs.tar.zst
           ls -lh staging
           test -f staging/rootfs-noboot.tar.zst
           test -f staging/dex2oat-inputs.tar.zst
