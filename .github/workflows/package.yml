@@ -14,9 +14,9 @@ on:
         required: false
         default: compat-tool-latest
       dex2oat_tag:
-        description: "Release tag holding dex2oat-inputs.tar.zst (default: staging_tag).框架 jar 没变时指向上一次的 release，省一次 139 MB 上行"
+        description: "公共 dex2oat 输入的 release tag；framework jar / ART apex 变化时才更新"
         required: false
-        default: ""
+        default: dex2oat-inputs-r46
 
 permissions:
   contents: write
@@ -47,12 +47,18 @@ jobs:
           gh release download "$STAGING" --dir staging --clobber \
             -p rootfs-noboot.tar.zst \
             -p build-manifest.json \
-            -p system.img -p vendor.img -p NOTICE.txt
+            -p system.img -p vendor.img -p NOTICE.txt -p SHA256SUMS.txt
+          # staging 流式上传曾发生 system.img 截断，先用构建机生成的清单校验。
+          (cd staging && grep -v '  dex2oat-inputs.tar.zst$' SHA256SUMS.txt | sha256sum -c -)
           # dex2oat-inputs 只与 system 侧的 framework jar / ART apex 有关，
-          # 这些没变时可以复用旧 release（省一次 139 MB 上传）。
-          DEX_TAG="${DEX2OAT_TAG:-$STAGING}"
-          gh release download "$DEX_TAG" --dir staging --clobber -p dex2oat-inputs.tar.zst \
-            || gh release download "$STAGING" --dir staging --clobber -p dex2oat-inputs.tar.zst
+          # 默认从独立的公共 release 获取，不再随每次 staging 重复上传。
+          DEX_TAG="${DEX2OAT_TAG:-dex2oat-inputs-r46}"
+          gh release download "$DEX_TAG" --dir staging --clobber -p dex2oat-inputs.tar.zst
+          expected_sha=$(gh release view "$DEX_TAG" --json assets \
+            --jq '.assets[] | select(.name == "dex2oat-inputs.tar.zst") | .digest | sub("^sha256:"; "")')
+          actual_sha=$(sha256sum staging/dex2oat-inputs.tar.zst | cut -d' ' -f1)
+          test -n "$expected_sha"
+          test "$actual_sha" = "$expected_sha"
           ls -lh staging
           test -f staging/rootfs-noboot.tar.zst
           test -f staging/dex2oat-inputs.tar.zst
