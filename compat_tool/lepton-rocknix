@@ -1,0 +1,70 @@
+#!/bin/bash
+# ROCKNIX SM8550 的设备专用默认配置；原 lepton 命令和上游默认行为不变。
+set -euo pipefail
+
+if ((EUID != 0)); then
+    echo "ROCKNIX Lepton 需要以 root 运行（rootful Podman）" >&2
+    exit 1
+fi
+
+LEPTON_HOME=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+export PATH="${LEPTON_HOME}/bin:/usr/sbin:${PATH}"
+export CONTAINERS_STORAGE_CONF="${CONTAINERS_STORAGE_CONF:-${LEPTON_HOME}/storage-native.conf}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/var/run/0-runtime-dir}"
+export GAMESCOPE_WAYLAND_DISPLAY="${GAMESCOPE_WAYLAND_DISPLAY:-wayland-1}"
+
+export LEPTON_STANDALONE="${LEPTON_STANDALONE:-1}"
+export LEPTON_NO_CLEANUP="${LEPTON_NO_CLEANUP:-1}"
+export LEPTON_DATA_BIND="${LEPTON_DATA_BIND:-1}"
+export LEPTON_CONTAINER_NETWORK="${LEPTON_CONTAINER_NETWORK:-bridge}"
+export LEPTON_BRIDGE_NETWORK="${LEPTON_BRIDGE_NETWORK:-lnet}"
+export NETAVARK_FW="${NETAVARK_FW:-none}"
+export LEPTON_ALLOW_KMSG="${LEPTON_ALLOW_KMSG:-true}"
+export LEPTON_LOGCAT_FILTER="${LEPTON_LOGCAT_FILTER:-disable}"
+export LEPTON_FORCE_SOFTWARE="${LEPTON_FORCE_SOFTWARE:-false}"
+export LEPTON_USE_QCOM_DRIVER="${LEPTON_USE_QCOM_DRIVER:-false}"
+export LEPTON_MESA_DRIVER="${LEPTON_MESA_DRIVER:-freedreno}"
+export LEPTON_DISPLAY_DENSITY="${LEPTON_DISPLAY_DENSITY:-360}"
+
+# ROCKNIX 启动时已固定 Sway scale=1。rect 已包含输出旋转，适合作为 Android 横屏尺寸。
+if [[ -z "${LEPTON_DISPLAY_WIDTH:-}" || -z "${LEPTON_DISPLAY_HEIGHT:-}" ]]; then
+    export SWAYSOCK="${SWAYSOCK:-${XDG_RUNTIME_DIR}/sway-ipc.0.sock}"
+    DETECTED_RES=""
+    if command -v swaymsg >/dev/null && [[ -S "${SWAYSOCK}" ]]; then
+        DETECTED_RES=$(swaymsg -t get_outputs 2>/dev/null | awk '
+            /"rect"[[:space:]]*:/ { in_rect=1; next }
+            in_rect && /"width"[[:space:]]*:/ {
+                line=$0; sub(/^[^:]*:[[:space:]]*/, "", line); sub(/[^0-9].*$/, "", line); width=line
+            }
+            in_rect && /"height"[[:space:]]*:/ {
+                line=$0; sub(/^[^:]*:[[:space:]]*/, "", line); sub(/[^0-9].*$/, "", line); height=line
+            }
+            in_rect && /}/ {
+                if (width != "" && height != "") { print width, height; exit }
+                in_rect=0
+            }' || true)
+    fi
+    DETECTED_WIDTH=${DETECTED_RES% *}
+    DETECTED_HEIGHT=${DETECTED_RES#* }
+fi
+export LEPTON_DISPLAY_WIDTH="${LEPTON_DISPLAY_WIDTH:-${DETECTED_WIDTH:-2560}}"
+export LEPTON_DISPLAY_HEIGHT="${LEPTON_DISPLAY_HEIGHT:-${DETECTED_HEIGHT:-1440}}"
+
+if (($# == 1)); then
+    case "$1" in
+        start|stop|kill|attach|shell|logcat|cleanup)
+            set -- "$1" dev
+            ;;
+    esac
+fi
+
+case "${1:-}" in
+    start|waitforexitandrun)
+        if [[ "${LEPTON_ROCKNIX_PREPARE_NETWORK:-1}" == "1" \
+            && "${LEPTON_CONTAINER_NETWORK}" == "bridge" ]]; then
+            RESET_NETWORK="${RESET_NETWORK:-1}" "${LEPTON_HOME}/net-setup.sh"
+        fi
+        ;;
+esac
+
+exec "${LEPTON_HOME}/lepton" "$@"

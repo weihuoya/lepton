@@ -82,7 +82,12 @@ function wait_for_container_file()
     fi
 }
 
-STEAM_LOG_PATH="$HOME/.steam/steam/logs"
+if standalone_enabled; then
+    STEAM_LOG_PATH="${LEPTON_LOG_DIR:-${HOME}/.local/state/lepton/logs}"
+else
+    STEAM_LOG_PATH="$HOME/.steam/steam/logs"
+fi
+mkdir -p "${STEAM_LOG_PATH}"
 
 function lepton_version()
 {

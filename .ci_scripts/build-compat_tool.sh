@@ -21,11 +21,14 @@ mkdir -p install
 pushd install
 
 cp ${PROJECT_DIR}/compat_tool/lepton .
+cp ${PROJECT_DIR}/compat_tool/lepton-rocknix .
+cp ${PROJECT_DIR}/compat_tool/net-setup.sh .
 
 # temp symlink
 ln -sf lepton fauxdroid
 
 cp -ra ${PROJECT_DIR}/compat_tool/toolmanifest.vdf .
+cp -ra ${PROJECT_DIR}/compat_tool/storage-native.conf .
 cp -ra ${PROJECT_DIR}/README.md .
 cp -ra ${PROJECT_DIR}/LICENSE.md .
 cp -ra ${PROJECT_DIR}/LICENSES .

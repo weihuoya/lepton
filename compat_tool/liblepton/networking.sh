@@ -2,6 +2,12 @@
 
 function podman_ip()
 {
+    # bridge 网络下用 lnet 网段的静态地址，而不是宿主 IP（pasta 语义）
+    if [[ "${LEPTON_CONTAINER_NETWORK:-}" == "bridge" ]]; then
+        print "${LEPTON_BRIDGE_IP:-10.0.4.2}"
+        return
+    fi
+
     local PODMAN_IP="$(podman inspect -f '{{ index .Config.Labels "IP" }}' "lepton-${1:-${LEPTON_CONTEXT}}" 2>/dev/null || true)"
     if [[ -n "${PODMAN_IP}" ]]; then
         print "${PODMAN_IP}"
@@ -73,6 +79,12 @@ function setup_podman_port_forwards()
 
 function podman_network_options()
 {
+    # 设备侧覆盖：rootful podman 不支持 pasta；host 网络会让 Android 改坏宿主网络
+    case "${LEPTON_CONTAINER_NETWORK:-}" in
+        none) print "--network=none"; return ;;
+        bridge) print "--network=${LEPTON_BRIDGE_NETWORK:-lnet}:ip=$(podman_ip)"; return ;;
+    esac
+
     local PODMAN_NETWORK_OPTIONS=""
 
     # Using a network type which works without root (pasta)
@@ -139,6 +151,26 @@ function writeString()
     printf "${1}"
 }
 
+function android_dns()
+{
+    if standalone_enabled && [[ "${LEPTON_CONTAINER_NETWORK:-}" == "bridge" ]]; then
+        print "$(podman_subnet).1"
+        return
+    fi
+
+    if [[ -n "${LEPTON_UPSTREAM_DNS:-}" ]]; then
+        print "${LEPTON_UPSTREAM_DNS}"
+        return
+    fi
+
+    local iface="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    local dns=""
+    if command -v resolvectl >/dev/null 2>&1; then
+        dns="$(resolvectl dns "${iface}" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')"
+    fi
+    print "${dns:-1.1.1.1}"
+}
+
 function generate_ipconfig_txt()
 {
     # File format version 3
@@ -154,7 +186,8 @@ function generate_ipconfig_txt()
     printf "\x00\x00\x00\x01" # have a gateway
     writeString "$(podman_subnet).1"
     writeString "dns"
-    writeString "$(podman_subnet).1"
+    # standalone/bridge 固定使用网桥 DNS，由宿主转发到当前上游。
+    writeString "$(android_dns)"
     writeString "proxySettings"
     writeString "NONE"
     writeString "id"

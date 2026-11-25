@@ -95,8 +95,8 @@ function setup_props()
             props_echo "ro.hardware.gralloc=minigbm_msm"
         fi
 
-        # Zink + disable kopper to work with mesa
-        props_echo "mesa.loader.driver.override=zink"
+        # 当前 rootfs 只编入 freedreno gallium；有 zink 的构建可用环境变量覆盖。
+        props_echo "mesa.loader.driver.override=${LEPTON_MESA_DRIVER:-freedreno}"
         props_echo "mesa.libgl.kopper.disable=true"
 
         # Tell Fossilize to write out shaders to this directory
@@ -108,15 +108,27 @@ function setup_props()
         fi
     fi
 
+    if [[ "${LEPTON_HWUI_VULKAN:-0}" == "1" ]]; then
+        props_echo "ro.hwui.use_vulkan=true"
+        props_echo "debug.hwui.renderer=vulkan"
+    fi
+
+    props_echo "ro.sf.lcd_density=${LEPTON_DISPLAY_DENSITY:-360}"
+    # SM8550 的 Sway scale=2：1280x720 经缩放后为 2560x1440，横屏铺满。
+    props_echo "persist.waydroid.width=${LEPTON_DISPLAY_WIDTH:-1280}"
+    props_echo "persist.waydroid.height=${LEPTON_DISPLAY_HEIGHT:-720}"
+
     props_echo "ro.vndk.lite=true"
     props_echo "ro.product.model=Lepton"
     props_echo "ro.product.manufacturer=Valve"
 
-    props_echo "ro.steam.running_in_app_container=true"
+    if ! standalone_enabled; then
+        props_echo "ro.steam.running_in_app_container=true"
+    fi
 
     # Set logcat to use a specific buffer size (useful when debugging)
     props_echo "ro.logd.size=${LEPTON_LOGCAT_BUFFER_SIZE:-256K}"
-    props_echo "ro.logd.filter=disable"
+    props_echo "ro.logd.filter=${LEPTON_LOGCAT_FILTER:-disable}"
 
     # Perhaps someday enable iorapd for I/O prefetching on apps
     # NOTE: In my testing, iorapd is so slow to start, we have to wait an extra 400ms
@@ -160,14 +172,20 @@ function setup_props()
 
     props_echo "lepton.active_app_launch_timeout=${LEPTON_APP_LAUNCH_TIMEOUT:-60}"
 
-    # Tell `libsteam_api.so` where to find `libsteamclient.so`
-    props_echo "lepton.steamclient.path=/system/lib64/libsteamclient.so"
+    if ! standalone_enabled; then
+        # Tell `libsteam_api.so` where to find `libsteamclient.so`
+        props_echo "lepton.steamclient.path=/system/lib64/libsteamclient.so"
+    fi
 
     # Tell renderdoc to flip certain behavioral switches for us:
     props_echo "debug.renderdoc.autograntpermissions=1"
 
-    # Enable traced
-    props_echo "persist.traced.enable=1"
+    # Enable traced only when SteamOS debugging is needed
+    if standalone_enabled; then
+        props_echo "persist.traced.enable=0"
+    else
+        props_echo "persist.traced.enable=1"
+    fi
     if is_app; then
         props_echo "debug.atrace.app_0=$(get_app_id)"
     fi

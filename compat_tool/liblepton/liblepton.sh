@@ -5,6 +5,10 @@ if [[ "${LIBLEPTON_STRICT:-true}" == "true" ]]; then
 fi
 LEPTON_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+if [[ "${EUID}" == "0" && -z "${CONTAINERS_STORAGE_CONF:-}" ]]; then
+    export CONTAINERS_STORAGE_CONF="${LEPTON_STORAGE_CONF:-${LEPTON_DIR}/../storage-native.conf}"
+fi
+
 # Global storage locations
 LEPTON_ENTRYPOINT="${LEPTON_DIR}/../lepton"
 LEPTON_DATA_DIR="${HOME}/.local/share/lepton/contexts"
@@ -17,6 +21,11 @@ APK_AUTO_INSTALL_DIR="${HOME}/lepton_auto_install_apks"
 ADB="/usr/lib/android-sdk/platform-tools/adb"
 
 MDNS_PUBLISH_PATH="${LEPTON_DIR}/mdns_publisher/bin/lepton-mdns-publish"
+
+function standalone_enabled()
+{
+    [[ "${LEPTON_STANDALONE:-0}" == "1" ]]
+}
 
 # Include our libraries of functionality
 source "${LEPTON_DIR}/utils.sh"
@@ -115,7 +124,31 @@ function prefix()
 
 function data_mount_path()
 {
-    print "$(get_baked_app_data_dir $@)/data_overlay"
+    local BAKED="$(get_baked_app_data_dir $@)"
+
+    # LEPTON_DATA_BIND=1：overlay /data 上 mmap 会 SIGBUS，改用 bind。
+    # app bake 存在时保留其中的应用数据；dev/首次启动则回退到系统 sysbake。
+    if [[ "${LEPTON_DATA_BIND:-0}" == "1" ]] && ! is_sysbake; then
+        local LIVE="${LEPTON_DATA_LIVE:-${BAKED}/data}"
+        local SOURCE="${BAKED}/data_overlay"
+        if [[ ! -d "${SOURCE}" ]]; then
+            SOURCE="${BAKED_SYSTEM_DATA_DIR}"
+        fi
+        if [[ ! -d "${LIVE}" ]]; then
+            mkdir -p "${LIVE}"
+            cp -a "${SOURCE}/." "${LIVE}/"
+        fi
+        # rootful 下 zygote/system_server 也运行成 UID 0；保留 sysbake 的
+        # UID 1000 会让 packages.xml、batterystats 等文件 EACCES。
+        if [[ "${EUID}" == "0" && -d "${LIVE}/system" ]] \
+            && [[ "$(stat -c %u "${LIVE}/system")" != "0" ]]; then
+            chown -R 0:0 "${LIVE}"
+        fi
+        print "${LIVE}"
+        return
+    fi
+
+    print "${BAKED}/data_overlay"
 }
 
 # The workdir must be in the same filesystem as the upperdir
@@ -185,7 +218,11 @@ function start_container()
     # and to avoid spawning multiple "init" processes.
     # --read-only and --rootfs with the :O option make sure that we don't
     # accidentally modify the rootfs storage itself.
-    USERNS_ARGS=(--userns=keep-id:uid=0,gid=0 --user 0:0 --group-add keep-groups)
+    if [[ "${EUID}" == "0" ]]; then
+        USERNS_ARGS=()
+    else
+        USERNS_ARGS=(--userns=keep-id:uid=0,gid=0 --user 0:0 --group-add keep-groups)
+    fi
     LOG_LEVEL_ARGS=()
     if [[ "${LEPTON_DEBUG:-false}" != "false" ]]; then
         LOG_LEVEL_ARGS=(--log-level=debug)
@@ -315,7 +352,7 @@ function start_container()
         logcat_container | tee -a "$(lepton_log_file)"
     ) &
 
-    if ! is_sysbake; then
+    if ! is_sysbake && ! standalone_enabled; then
         (
             uninherit_lepton_lock
 
@@ -720,7 +757,7 @@ function is_context_live()
 
     list_live_contexts | grep -Fxq "${CONTEXT}" && return 0
 
-    if ! is_steamlaunch "${CONTEXT}"; then
+    if ! standalone_enabled && ! is_steamlaunch "${CONTEXT}"; then
         for GAME in ${STEAMAPPS_PATH}/appmanifest_*.acf; do
             if [[ "$(grep "\"name\"" "${GAME}" | cut -d'"' -f4)" == "${CONTEXT}" ]]; then
                 local STEAMLAUNCH_CONTEXT="steamlaunch-$(grep "\"appid\"" "${GAME}" | cut -d'"' -f4)"
@@ -861,7 +898,7 @@ function determine_app()
         export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_PATH}"
     fi
 
-    if ! is_sysbake && [[ "${LEPTON_CONTEXT}" != "dev" ]] && ! is_steamlaunch "${LEPTON_CONTEXT}" && [[ "${LEPTON_CONTEXT}" != *".apk" ]]; then
+    if ! standalone_enabled && ! is_sysbake && [[ "${LEPTON_CONTEXT}" != "dev" ]] && ! is_steamlaunch "${LEPTON_CONTEXT}" && [[ "${LEPTON_CONTEXT}" != *".apk" ]]; then
         # Might be the name of a game, let's see.
         # This might be slow when there's a ton of games, but it's kind of a debug option anyways.
         for GAME in ${STEAMAPPS_PATH}/appmanifest_*.acf; do

@@ -1,0 +1,38 @@
+diff --git a/lepton_arm64_only/BoardConfig.mk b/lepton_arm64_only/BoardConfig.mk
+index b86a4a1..431f58e 100644
+--- a/lepton_arm64_only/BoardConfig.mk
++++ b/lepton_arm64_only/BoardConfig.mk
+@@ -21,4 +21,11 @@ AUDIOSERVER_MULTILIB := first
+ # We inject vulkan drivers from elsewhere
+ # and we only need mesa to be able to build
+ # gralloc against libgbm_mesa.
+-BOARD_MESA3D_VULKAN_DRIVERS :=
++BOARD_MESA3D_VULKAN_DRIVERS := freedreno
++BOARD_MESA3D_GALLIUM_DRIVERS := freedreno
++
++# Apple Container + Rosetta 跑不了 dex2oatd64：它要求宿主堆地址 < 4 GB（MAP_32BIT），
++# Rosetta 不提供，boot image 的 dex_bootjars 会在 99% 报
++# `Check failed: ref <= 0xFFFFFFFFU`。这里关掉 dexpreopt，
++# boot image 交给 GitHub CI 的 package.yml 生成（见 rockdoc/WAYDROID_BUILD_MACOS.md §8.9.5）。
++WITH_DEXPREOPT := false
+diff --git a/lepton_arm64_only/lineage_lepton_arm64_only.mk b/lepton_arm64_only/lineage_lepton_arm64_only.mk
+index 5f4189c..cc0d675 100644
+--- a/lepton_arm64_only/lineage_lepton_arm64_only.mk
++++ b/lepton_arm64_only/lineage_lepton_arm64_only.mk
+@@ -11,3 +11,16 @@ PRODUCT_DEVICE := lepton_arm64_only
+ PRODUCT_MANUFACTURER := Lepton
+ PRODUCT_NAME := lineage_lepton_arm64_only
+ PRODUCT_MODEL := Lepton arm64 only Device
++
++# 硬件渲染：mesa 的 gallium/turnip 驱动是按 prebuilt 模块定义的（external/mesa/android/Android.mk
++# 里的 mesa3d-lib 宏），只有被 PRODUCT_PACKAGES 引用才会装进 /vendor：
++#   libgallium_dri      -> /vendor/lib64/libgallium_dri.so（freedreno gallium 驱动）
++#   libEGL_mesa         -> /vendor/lib64/egl/libEGL_mesa.so     （ro.hardware.egl=mesa）
++#   libGLESv2_mesa      -> /vendor/lib64/egl/libGLESv2_mesa.so
++#   vulkan.freedreno    -> /vendor/lib64/hw/vulkan.freedreno.so （ro.hardware.vulkan=freedreno）
++PRODUCT_PACKAGES += \
++    libgallium_dri \
++    libEGL_mesa \
++    libGLESv1_CM_mesa \
++    libGLESv2_mesa \
++    vulkan.freedreno

@@ -142,6 +142,10 @@ function enable_vulkan_layer()
 
 function enable_vulkan_layers()
 {
+    if standalone_enabled; then
+        return
+    fi
+
     # The ordering of vulkan layers matters; we conceptually think of layers
     # being applied to render commands flowing from the application to the driver.
     # In general we want to preserve the following properties:
@@ -178,7 +182,7 @@ function enable_vulkan_layers()
     fi
 
     # Fossilize goes after any other normal layers
-    enable_vulkan_layer "${FOSSILIZE_LAYER_NAME}"
+    enable_vulkan_layer "${FOSSILIZE_LAYER_NAME}" || true
 
     # If you want to debug the app + layers, vulkan validation layers inserted here makes sense
     if [[ "${ENABLE_VULKAN_VALIDATION_LAYER_LATE:-0}" != "0" ]]; then

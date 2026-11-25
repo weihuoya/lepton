@@ -78,8 +78,13 @@ function setup_mounts()
     # However do this using bind mounts because we cannot use multiple
     # lowerdirs with the rootfs
     GUESTOS_OVERLAY="/usr/share/guestos/android"
+    if standalone_enabled; then
+        GUESTOS_OVERLAY=""
+    fi
+    STANDALONE_OVERLAY=""
 
-    for OVERLAY in "${LEPTON_OVERLAY}" "${GUESTOS_OVERLAY}"; do
+    for OVERLAY in "${LEPTON_OVERLAY}" "${STANDALONE_OVERLAY}" "${GUESTOS_OVERLAY}"; do
+        [[ -d "${OVERLAY}" ]] || continue
         pushd "${OVERLAY}" >/dev/null || exit
         while IFS= read -r -d '' file; do
             DST="${file#./}"
@@ -102,7 +107,7 @@ function setup_mounts()
         APP_MOUNT_TARGET="$(get_app_mount_dir)"
     fi
 
-    if is_sysbake; then
+    if is_sysbake || [[ "${LEPTON_DATA_BIND:-0}" == "1" ]]; then
         podman_cmdline --mount "type=bind,source="$(data_mount_path)",target=/data"
     else
         local DATA_OVERLAY_UPPERDIR="$(data_mount_path)"
@@ -163,7 +168,7 @@ function setup_mounts()
         podman_mount_entry_optional "${HOME}/Downloads" "${HOME}/Downloads" rw
     fi
 
-    if steamos_devmode_enabled; then
+    if steamos_devmode_enabled && ! standalone_enabled; then
         if perfetto_installed; then
             podman_mount_entry_optional /tmp/perfetto-producer /dev/socket/traced_producer rw
         else
@@ -183,7 +188,9 @@ function setup_mounts()
         podman_mount_entry "${LEPTON_MOUNT_OBB_DIR}" "/${APP_MOUNT_TARGET}/obb" ro
     fi
 
-    podman_mount_entry "${HOME}/.steam/steam.pipe" "/lepton/steam.pipe" rw
+    if ! standalone_enabled; then
+        podman_mount_entry "${HOME}/.steam/steam.pipe" "/lepton/steam.pipe" rw
+    fi
 }
 
 # Give podman some of its boilerplate information
@@ -210,7 +217,8 @@ function setup_podman_base()
     fi
 
     # nice rlimit (prevents binder messages in dmesg)
-    podman_cmdline --ulimit nice=20:20
+    # 容器内没有宿主 CAP_SYS_RESOURCE，无法设置 nice rlimit（ROCKNIX 上必失败）
+    # podman_cmdline --ulimit nice=20:20
 
     # capabilities
     podman_cmdline --cap-drop ALL
@@ -238,6 +246,16 @@ function setup_podman_base()
     podman_cmdline --cap-add fowner
     podman_cmdline --cap-add ipc_lock
     podman_cmdline --cap-add sys_chroot
+
+    # podman 默认把 /proc/sys 挂成只读，Android 的 netd 需要写
+    # /proc/sys/net/ipv6/conf/<iface>/* 才能配置以太网
+    podman_cmdline --security-opt unmask=/proc/sys
+
+    # binderfs 的设备节点是动态创建的，不在 podman 默认 device cgroup 白名单里，
+    # 不加这条规则容器内 open("/dev/binder") 会返回 EPERM。
+    podman_cmdline --device-cgroup-rule "c 507:* rwm"
+    # DRI 也是 bind mount；renderD128/card0 需要显式放行，否则 Mesa open DRM 失败。
+    podman_cmdline --device-cgroup-rule "c 226:* rwm"
 
     # hostname
     podman_cmdline --hostname "lepton-${LEPTON_CONTEXT}"
@@ -385,17 +403,19 @@ function generate_zygote_launch_rc()
         fi
     done
 
-    # provide a vr config file
-    println "    setenv VR_PATHREG_OVERRIDE /vendor/etc/openvrpaths.vrpath" >> "${ZYGOTE_LAUNCH_RC}"
-    podman_mount_entry "${LEPTON_DIR}/openvrpaths.vrpath" "/vendor/etc/openvrpaths.vrpath" ro,U
+    if ! standalone_enabled; then
+        # provide a vr config file
+        println "    setenv VR_PATHREG_OVERRIDE /vendor/etc/openvrpaths.vrpath" >> "${ZYGOTE_LAUNCH_RC}"
+        podman_mount_entry "${LEPTON_DIR}/openvrpaths.vrpath" "/vendor/etc/openvrpaths.vrpath" ro,U
 
-    # tell vrclient where to find our steamvr config/logs
-    println "    setenv VR_CONFIG_PATH /data/steamvr/config" >> "${ZYGOTE_LAUNCH_RC}"
-    println "    setenv VR_LOG_PATH /data/steamvr/logs" >> "${ZYGOTE_LAUNCH_RC}"
+        # tell vrclient where to find our steamvr config/logs
+        println "    setenv VR_CONFIG_PATH /data/steamvr/config" >> "${ZYGOTE_LAUNCH_RC}"
+        println "    setenv VR_LOG_PATH /data/steamvr/logs" >> "${ZYGOTE_LAUNCH_RC}"
 
-    # Tell Mesa where to slurp up its shaders
-    #println "    setenv MESA_SHADER_CACHE_DIR /data/shaders" >> "${ZYGOTE_LAUNCH_RC}"
-    println "    setenv Steam3Master $(podman_subnet).1:57343" >> "${ZYGOTE_LAUNCH_RC}"
+        # Tell Mesa where to slurp up its shaders
+        #println "    setenv MESA_SHADER_CACHE_DIR /data/shaders" >> "${ZYGOTE_LAUNCH_RC}"
+        println "    setenv Steam3Master $(podman_subnet).1:57343" >> "${ZYGOTE_LAUNCH_RC}"
+    fi
 
     chmod 0644 "${ZYGOTE_LAUNCH_RC}"
     podman_mount_entry "${ZYGOTE_LAUNCH_RC}" "/system/etc/init/hw/init.zygote64.rc" ro,U
@@ -447,7 +467,7 @@ function setup_podman_mounts()
     podman_cmdline --tmpfs /waydroid/xdg
 
     local DEV_NODES=(
-        zero null full fuse tty char
+        zero null full char
 
         # Shared memory
         shm
@@ -492,6 +512,36 @@ function setup_podman_mounts()
         fi
     done
 
+    # Pass through gamepad evdev nodes discovered from the host input inventory.
+    # Handler numbers vary by boot and hotplug order, so resolve them at startup.
+    GAMEPAD_HANDLERS=$(awk '
+        BEGIN { RS=""; FS="\n" }
+        tolower($0) ~ /dualsense|gamepad|x-box|xbox|joystick|playstation/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^H: Handlers=/) {
+                    line=$i
+                    sub(/^H: Handlers=/, "", line)
+                    split(line, handlers, " ")
+                    for (j in handlers) {
+                        if (handlers[j] ~ /^(event|js)[0-9]+$/) {
+                            print "/dev/input/" handlers[j]
+                        }
+                    }
+                }
+            }
+        }' /proc/bus/input/devices)
+    for dev in ${GAMEPAD_HANDLERS}; do
+        if [[ -c "${dev}" ]]; then
+            podman_cmdline --device "${dev}"
+        fi
+    done
+
+    # A bind alone does not update the device access rules; vold needs to open
+    # /dev/fuse to mount /storage/emulated/<user> instead of falling back to tmpfs.
+    if [[ -e "/dev/fuse" ]]; then
+        podman_cmdline --device /dev/fuse
+    fi
+
     # By default, we do not allow writes to msg
     local KMSG_MOUNT="/dev/null"
     if [[ "${LEPTON_ALLOW_KMSG:-false}" != "false" ]]; then
@@ -518,7 +568,8 @@ function setup_podman_mounts()
     touch "${DATA_OVERLAY}/misc/ethernet/ipconfig.txt"
     podman_mount_entry "$(prefix)/ipconfig.txt" "/data/misc/ethernet/ipconfig.txt" rw
 
-    if ! is_sysbake; then
+    # SteamOS 的 `steamvr` 工具在非 SteamOS 宿主上不存在，跳过 steamvr 挂载
+    if ! is_sysbake && command -v steamvr >/dev/null 2>&1; then
         mkdir -p "${DATA_OVERLAY}/steamvr/runtime"
         # Add our steamvr build into `/data/steamvr/runtime` and `/data/steamvr/config`
         podman_mount_entry "$(steamvr path)" "/data/steamvr/runtime" rw
